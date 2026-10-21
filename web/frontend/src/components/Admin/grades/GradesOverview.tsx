@@ -1,7 +1,6 @@
 import { type ReactNode, useState } from "react"
 
 import { Button } from "@/components/ui/button"
-import { Input } from "@/components/ui/input"
 import {
   Table,
   TableBody,
@@ -10,9 +9,9 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table"
-import { cn } from "@/lib/utils"
 import ClaimColoredText from "./ClaimColoredText"
-import { MetricInfo, Ratio, ReviewChip } from "./chips"
+import { SplitBar, Swatch } from "./charts"
+import { HumansVsHumansInfo, Ratio, ReviewChip } from "./chips"
 import {
   claimColorOwners,
   type GradesModel,
@@ -22,46 +21,16 @@ import {
 
 type Filter = "all" | "disagree" | "split" | "flagged" | "added" | "unreviewed"
 
-/** The explanation behind both "Humans disagree with humans" numbers. */
-function HumansVsHumansInfo() {
-  return (
-    <MetricInfo title="Humans disagree with humans on claim grade">
-      <ul className="list-disc space-y-2 pl-5 text-sm">
-        <li>
-          Only model claims that two or more reviewers graded count. A claim
-          with one reviewer is skipped, because there is nobody for that
-          reviewer to disagree with.
-        </li>
-        <li>
-          Every grade given on those claims is counted. That is the second
-          number.
-        </li>
-        <li>
-          On each claim, the most common grade is the majority. Every other
-          grade on that claim counts as a disagreement. Those add up to the
-          first number.
-        </li>
-        <li>
-          Examples: vital, vital, unimportant scores 1 of 3. Vital,
-          semi-important, unimportant scores 2 of 3. Vital and semi-important
-          from two reviewers scores 1 of 2.
-        </li>
-        <li>
-          The model's grade is not part of this. Neither are the review buttons;
-          those are counted under review issues.
-        </li>
-      </ul>
-    </MetricInfo>
-  )
-}
-
 function StatTile({
   label,
   value,
+  meter,
   details,
 }: {
   label: ReactNode
   value?: string
+  /** A thin bar drawn under the big number. */
+  meter?: ReactNode
   details: ReactNode[]
 }) {
   return (
@@ -70,6 +39,7 @@ function StatTile({
       {value ? (
         <span className="text-2xl font-semibold leading-none">{value}</span>
       ) : null}
+      {meter ? <div className="mt-1">{meter}</div> : null}
       <ul className="mt-1 list-disc space-y-1 pl-4 text-muted-foreground text-xs">
         {details.map((detail, index) => (
           <li key={index}>{detail}</li>
@@ -88,9 +58,9 @@ function matchesFilter(task: TaskSummary, filter: Filter): boolean {
     case "flagged":
       return task.flaggedReviews > 0
     case "added":
-      return task.addedCount > 0
+      return task.addedClaims > 0
     case "unreviewed":
-      return task.status === "unreviewed"
+      return !task.reviewed
     default:
       return true
   }
@@ -104,7 +74,6 @@ export default function GradesOverview({
   onOpenTask: (caseId: string) => void
 }) {
   const [filter, setFilter] = useState<Filter>("all")
-  const [search, setSearch] = useState("")
   const { totals } = model
 
   const counts: Record<Filter, number> = {
@@ -112,30 +81,19 @@ export default function GradesOverview({
     disagree: model.tasks.filter((t) => t.disagreeCount > 0).length,
     split: model.tasks.filter((t) => t.splitCount > 0).length,
     flagged: model.tasks.filter((t) => t.flaggedReviews > 0).length,
-    added: model.tasks.filter((t) => t.addedCount > 0).length,
-    unreviewed: model.tasks.filter((t) => t.status === "unreviewed").length,
+    added: model.tasks.filter((t) => t.addedClaims > 0).length,
+    unreviewed: model.tasks.filter((t) => !t.reviewed).length,
   }
   const filters: { key: Filter; label: string }[] = [
     { key: "all", label: "All tasks" },
-    { key: "disagree", label: "Humans disagree with model" },
-    { key: "split", label: "Humans disagree with humans" },
-    { key: "flagged", label: "Human review issues" },
-    { key: "added", label: "Human added claims" },
+    { key: "disagree", label: "Humans disagree with model on claim grade" },
+    { key: "split", label: "Humans disagree with humans on claim grade" },
+    { key: "flagged", label: "Humans flagged claim" },
+    { key: "added", label: "Humans added claims" },
     { key: "unreviewed", label: "Unreviewed" },
   ]
 
-  const needle = search.trim().toLowerCase()
-  const visibleTasks = model.tasks.filter(
-    (task) =>
-      matchesFilter(task, filter) &&
-      (needle === "" ||
-        task.caseId.toLowerCase().includes(needle) ||
-        (task.question ?? "").toLowerCase().includes(needle) ||
-        task.response.toLowerCase().includes(needle) ||
-        task.claims.some((claim) =>
-          claim.claim.toLowerCase().includes(needle),
-        )),
-  )
+  const visibleTasks = model.tasks.filter((task) => matchesFilter(task, filter))
 
   return (
     <div className="flex flex-col gap-6">
@@ -145,9 +103,6 @@ export default function GradesOverview({
             <>
               {totals.reviewed} of {totals.tasks}{" "}
               <strong className="font-semibold">TASKS</strong> reviewed
-              {totals.unreviewed === 0
-                ? ""
-                : `, ${totals.unreviewed} with no review yet`}
             </>,
             <>
               {totals.judged} of {totals.claims}{" "}
@@ -158,6 +113,15 @@ export default function GradesOverview({
               {totals.judgments}{" "}
               <strong className="font-semibold">CLAIMS ASSESSED</strong> (one
               per reviewer per reviewed claim)
+            </>,
+            <>
+              {totals.multiGraded} of {totals.judged} reviewed{" "}
+              <strong className="font-semibold">CLAIMS</strong> have two or more
+              reviewers (
+              {totals.reviewed > 0
+                ? (totals.reviews / totals.reviewed).toFixed(1)
+                : "0"}{" "}
+              reviewers per reviewed task)
             </>,
           ]}
           label="Totals"
@@ -173,8 +137,24 @@ export default function GradesOverview({
               {totals.disagreements} of {totals.judged} graded model claims had
               at least one grade changed
             </>,
+            <>
+              {totals.gradedUp} graded up (toward vital), {totals.gradedDown}{" "}
+              graded down
+            </>,
           ]}
-          label="Humans disagree with model on grade"
+          label="Humans disagree with model on claim grade"
+          meter={
+            <SplitBar
+              segments={[
+                {
+                  tone: "all",
+                  count: totals.changed,
+                  label: "grades that differ from the model's",
+                },
+              ]}
+              total={totals.judgments}
+            />
+          }
           value={percent(totals.changed, totals.judgments)}
         />
         <StatTile
@@ -191,9 +171,21 @@ export default function GradesOverview({
           ]}
           label={
             <>
-              Humans disagree with humans on grade
+              Humans disagree with humans on claim grade
               <HumansVsHumansInfo />
             </>
+          }
+          meter={
+            <SplitBar
+              segments={[
+                {
+                  tone: "all",
+                  count: totals.minorityGrades,
+                  label: "grades outside the most common grade on their claim",
+                },
+              ]}
+              total={totals.multiGradedGrades}
+            />
           }
           value={percent(totals.minorityGrades, totals.multiGradedGrades)}
         />
@@ -204,9 +196,21 @@ export default function GradesOverview({
               <strong className="font-semibold">REVIEWS</strong> had a review
               issue
               <ul className="mt-1 list-[circle] space-y-1 pl-4">
-                <li>{totals.issues} Extraction issue</li>
-                <li>{totals.duplicates} Duplicate</li>
-                <li>{totals.multipleFacts} Multiple facts</li>
+                <li>
+                  <Swatch tone="all" />
+                  {totals.issues} Extraction issue
+                </li>
+                <li>
+                  <Swatch tone="some" />
+                  {totals.duplicates} Duplicate
+                </li>
+                <li>
+                  <Swatch tone="single" />
+                  {totals.multipleFacts} Multiple Facts
+                </li>
+                <li className="list-none text-muted-foreground">
+                  a review can carry more than one flag
+                </li>
               </ul>
             </>,
             <>
@@ -214,14 +218,37 @@ export default function GradesOverview({
               at least one
             </>,
           ]}
-          label="Human review issues"
+          label="Humans flagged claim"
+          meter={
+            <SplitBar
+              segments={[
+                {
+                  tone: "all",
+                  count: totals.issues,
+                  label: "Extraction issue",
+                },
+                { tone: "some", count: totals.duplicates, label: "Duplicate" },
+                {
+                  tone: "single",
+                  count: totals.multipleFacts,
+                  label: "Multiple Facts",
+                },
+              ]}
+              total={totals.judgments}
+            />
+          }
           value={percent(totals.flaggedReviews, totals.judgments)}
         />
         <StatTile
           details={[
+            <>{totals.added - totals.splits} are new claims the model missed</>,
             <>
-              {totals.splits} are{" "}
+              {totals.splits} came from{" "}
               <ReviewChip small>Split into atoms</ReviewChip>
+            </>,
+            <>
+              {totals.additions} additions by reviewers in all; the same claim
+              added by two people counts once above
             </>,
           ]}
           label="Claims added by reviewers"
@@ -242,18 +269,6 @@ export default function GradesOverview({
             {entry.label} · {counts[entry.key]}
           </Button>
         ))}
-        <div className="flex-1" />
-        <label className="sr-only" htmlFor="grades-search">
-          Search tasks
-        </label>
-        <Input
-          className="h-8 w-64"
-          id="grades-search"
-          onChange={(event) => setSearch(event.target.value)}
-          placeholder="Search question or claim text"
-          type="search"
-          value={search}
-        />
       </section>
 
       <section className="overflow-x-auto rounded-md border">
@@ -274,22 +289,16 @@ export default function GradesOverview({
                 Humans disagree with humans on claim grade
                 <HumansVsHumansInfo />
               </TableHead>
-              <TableHead className="w-24">
-                Humans flagged a review issue
-              </TableHead>
+              <TableHead className="w-24">Humans flagged claim</TableHead>
               <TableHead className="w-20 text-right">
-                Human added claims
+                Humans added claims
               </TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
             {visibleTasks.map((task) => (
               <TableRow
-                className={cn(
-                  "hover:bg-transparent [&>td]:py-4 [&>td]:align-top",
-                  task.disagreeCount > 0 &&
-                    "bg-amber-50/60 hover:bg-amber-50/60 dark:bg-amber-950/25 dark:hover:bg-amber-950/25",
-                )}
+                className="hover:bg-transparent [&>td]:py-4 [&>td]:align-top"
                 key={task.caseId}
               >
                 <TableCell className="text-right font-mono">
@@ -346,7 +355,7 @@ export default function GradesOverview({
                   )}
                 </TableCell>
                 <TableCell className="text-right font-mono">
-                  {task.addedCount}
+                  {task.addedClaims}
                 </TableCell>
               </TableRow>
             ))}

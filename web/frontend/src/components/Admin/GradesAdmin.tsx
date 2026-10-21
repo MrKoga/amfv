@@ -160,7 +160,7 @@ export default function GradesAdmin() {
             />
           </TabsContent>
           <TabsContent className="mt-4" value="analysis">
-            <GradesAnalysis model={model} />
+            <GradesAnalysis model={model} onOpenTask={openTask} />
           </TabsContent>
         </Tabs>
       ) : (

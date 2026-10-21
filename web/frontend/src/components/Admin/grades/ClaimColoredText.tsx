@@ -1,5 +1,4 @@
-import type React from "react"
-import { type ReactNode, useState } from "react"
+import { type MouseEvent, type ReactNode, useState } from "react"
 
 import type { ResponseClaimSpan } from "@/client"
 import { evalItemColor } from "@/lib/evalItemPalette"
@@ -24,7 +23,7 @@ const UNDERLINE_OFFSETS = ["pb-[2px]", "pb-[6px]", "pb-[10px]"]
  * the pointer sits on it, or a model claim's underline when the pointer is
  * in the padding below the words. Over the words themselves, null.
  */
-function lineUnderPointer(event: React.MouseEvent): number | null {
+function lineUnderPointer(event: MouseEvent): number | null {
   const target = event.target as HTMLElement
   const line = target.closest<HTMLElement>("[data-line-position]")
   if (!line) return null

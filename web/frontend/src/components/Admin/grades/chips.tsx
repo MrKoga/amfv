@@ -20,20 +20,12 @@ import {
   percent,
   type Reviewer,
 } from "./gradesModel"
+import { REVIEW_CHOICES } from "./reviewOptions"
 
-/** The review-page button names. */
-const CHOICE_TEXT: Record<keyof ChoiceCounts, string> = {
-  looksGood: "Looks good",
-  issue: "Extraction issue",
-  duplicate: "Duplicate",
-  multipleFacts: "Multiple facts",
-}
-const CHOICE_ORDER: (keyof ChoiceCounts)[] = [
-  "looksGood",
-  "issue",
-  "duplicate",
-  "multipleFacts",
-]
+const CHOICE_ORDER = REVIEW_CHOICES.map((choice) => choice.key)
+const CHOICE_TEXT = Object.fromEntries(
+  REVIEW_CHOICES.map((choice) => [choice.key, choice.text]),
+) as Record<keyof ChoiceCounts, string>
 
 /** A review choice shown the way the review page's buttons look, but not clickable. */
 export function ReviewChip({
@@ -61,7 +53,7 @@ export function ReviewChip({
  * A small info icon next to a metric's name. Clicking it opens a dialog that
  * explains how the metric is calculated.
  */
-export function MetricInfo({
+function MetricInfo({
   title,
   children,
 }: {
@@ -87,6 +79,39 @@ export function MetricInfo({
         {children}
       </DialogContent>
     </Dialog>
+  )
+}
+
+/** The explanation behind every "Humans disagree with humans on claim grade" number. */
+export function HumansVsHumansInfo() {
+  return (
+    <MetricInfo title="Humans disagree with humans on claim grade">
+      <ul className="list-disc space-y-2 pl-5 text-sm">
+        <li>
+          Only model claims that two or more reviewers graded count. A claim
+          with one reviewer is skipped, because there is nobody for that
+          reviewer to disagree with.
+        </li>
+        <li>
+          Every grade given on those claims is counted. That is the second
+          number.
+        </li>
+        <li>
+          On each claim, the most common grade is the majority. Every other
+          grade on that claim counts as a disagreement. Those add up to the
+          first number.
+        </li>
+        <li>
+          Examples: vital, vital, unimportant scores 1 of 3. Vital,
+          semi-important, unimportant scores 2 of 3. Vital and semi-important
+          from two reviewers scores 1 of 2.
+        </li>
+        <li>
+          The model's grade is not part of this. Neither are the review buttons;
+          those are counted under flagged claims.
+        </li>
+      </ul>
+    </MetricInfo>
   )
 }
 
@@ -128,37 +153,32 @@ function reviewerColor(index: number): string {
   return REVIEWER_COLORS[index % REVIEWER_COLORS.length]
 }
 
+/** A reviewer's initials in their color, with their name beside. */
 export function ReviewerChip({
   reviewer,
   index,
-  size = "md",
-  withName = false,
 }: {
   reviewer: Reviewer
+  /** Position in the dataset's reviewer list, which picks the color. */
   index: number
-  size?: "sm" | "md"
-  withName?: boolean
 }) {
   return (
     <span className="inline-flex items-center gap-2">
       <span
         className={cn(
-          "inline-flex shrink-0 items-center justify-center rounded-full font-semibold",
-          size === "sm" ? "size-6 text-[10px]" : "size-8 text-xs",
+          "inline-flex size-6 shrink-0 items-center justify-center rounded-full text-[10px] font-semibold",
           reviewerColor(index),
         )}
         title={`${reviewer.name} (${reviewer.kind})`}
       >
         {reviewer.initials}
       </span>
-      {withName ? (
-        <span className="text-sm">
-          {reviewer.name}
-          {reviewer.kind === "expert" ? (
-            <span className="text-muted-foreground"> · expert</span>
-          ) : null}
-        </span>
-      ) : null}
+      <span className="text-sm">
+        {reviewer.name}
+        {reviewer.kind === "expert" ? (
+          <span className="text-muted-foreground"> · expert</span>
+        ) : null}
+      </span>
     </span>
   )
 }
@@ -166,9 +186,9 @@ export function ReviewerChip({
 /**
  * What one reviewer did with one model claim, worded like the review page:
  * the grade they left it with, then the review choice (Looks good,
- * Extraction issue with its note, Duplicate, Multiple facts).
+ * Extraction issue with its note, Duplicate, Multiple Facts).
  */
-export function DecisionChips({
+export function ReviewerDecision({
   judgment,
   proposedLabel,
 }: {
@@ -250,12 +270,7 @@ function IssueNotesDialog({
               <Fragment key={judgment.reviewerId}>
                 <dt className="pt-0.5">
                   {reviewer ? (
-                    <ReviewerChip
-                      index={index}
-                      reviewer={reviewer}
-                      size="sm"
-                      withName
-                    />
+                    <ReviewerChip index={index} reviewer={reviewer} />
                   ) : (
                     <span className="text-muted-foreground text-sm">
                       unknown reviewer
@@ -273,7 +288,7 @@ function IssueNotesDialog({
 }
 
 /** Two columns: a label per row, then how many reviewers chose it. */
-export function CountRows({
+function CountRows({
   rows,
 }: {
   rows: { key: string; label: ReactNode; count: number; note?: string }[]

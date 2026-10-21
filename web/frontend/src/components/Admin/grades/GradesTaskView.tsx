@@ -23,9 +23,10 @@ import ClaimColoredText from "./ClaimColoredText"
 import ClaimReviewsDialog from "./ClaimReviewsDialog"
 import {
   AddedGradeCell,
-  DecisionChips,
   GradeText,
+  HumansVsHumansInfo,
   Ratio,
+  ReviewerDecision,
   ReviewersGradeCell,
   ReviewersReviewCell,
 } from "./chips"
@@ -37,9 +38,9 @@ import {
   groupAddedClaims,
   LABELS,
 } from "./gradesModel"
-import { GRADE_OPTIONS, REVIEW_OPTIONS } from "./reviewOptions"
+import { GRADE_OPTIONS, REVIEW_CHOICES, REVIEW_OPTIONS } from "./reviewOptions"
 
-// Columns shrink to fit the page; these minimums keep chips and notes readable.
+// Columns shrink to fit the page; these minimums keep the text cells readable.
 const CLAIM_CELL = "min-w-[180px] whitespace-normal align-top text-sm"
 const SOURCE_CELL = "min-w-[180px] whitespace-normal align-top text-xs"
 const GRADE_CELL = "min-w-[150px] whitespace-normal align-top"
@@ -64,8 +65,8 @@ function HeaderWithOptions({
 }
 
 /**
- * The passages of the source a claim was drawn from, each tinted with the
- * claim's color so they match the highlighted source text above.
+ * The passages of the source a claim was drawn from, each underlined in the
+ * claim's color so they match the marked source text above.
  */
 function SpanQuotes({
   position,
@@ -105,7 +106,7 @@ function SpanQuotes({
   )
 }
 
-/** A note in the Disagree column; hovering it gives the specifics. */
+/** A count in one of the disagreement columns; hovering it gives the specifics. */
 function FlagMark({ text, detail }: { text: ReactNode; detail: string }) {
   return (
     <Tooltip>
@@ -131,35 +132,17 @@ function gradeBreakdown(claim: ClaimSummary): string {
 
 /** "2 Extraction issue, 1 Duplicate" for the flag tooltip. */
 function flagBreakdown(claim: ClaimSummary): string {
-  const flags: [number, string][] = [
-    [claim.choiceCounts.issue, "Extraction issue"],
-    [claim.choiceCounts.duplicate, "Duplicate"],
-    [claim.choiceCounts.multipleFacts, "Multiple facts"],
-  ]
-  return flags
-    .filter(([count]) => count > 0)
-    .map(([count, name]) => `${count} ${name}`)
+  return REVIEW_CHOICES.filter(
+    (choice) =>
+      choice.key !== "looksGood" && claim.choiceCounts[choice.key] > 0,
+  )
+    .map((choice) => `${claim.choiceCounts[choice.key]} ${choice.text}`)
     .join(", ")
 }
 
 /** Reviewers whose grade differs from the model's. */
 function changedCount(claim: ClaimSummary): number {
   return claim.judgments.filter((judgment) => judgment.changed).length
-}
-
-function SummaryItem({
-  label,
-  children,
-}: {
-  label: string
-  children: ReactNode
-}) {
-  return (
-    <span className="flex flex-col items-start gap-1">
-      <span className="text-muted-foreground text-xs">{label}</span>
-      {children}
-    </span>
-  )
 }
 
 /** DOM id of a claim's row in the table, used to scroll it into view. */
@@ -297,24 +280,30 @@ export default function GradesTaskView({
             owners={owners}
             text={task.response}
           />
-          <ul className="list-disc space-y-1 border-t pt-3 pl-4 text-xs text-muted-foreground">
-            <li>
-              A colored line under a passage marks the model claim it came from.
-              The color matches the claim's dot in the # column.
-            </li>
-            <li>
-              When two model claims share words, their lines stack below the
-              passage, and each claim keeps its own level for its whole passage.
-            </li>
-            <li>
-              A colored line above a passage marks a claim a human reviewer
-              added (the +1, +2 rows).
-            </li>
-            <li>
-              Click a marked passage to select its claim in the table. Where
-              claims overlap, click again to move to the next one.
-            </li>
-          </ul>
+          <details className="border-t pt-3 text-xs text-muted-foreground">
+            <summary className="cursor-pointer font-medium">
+              How to read the lines
+            </summary>
+            <ul className="mt-2 list-disc space-y-1 pl-4">
+              <li>
+                A colored line under a passage marks the model claim it came
+                from. The color matches the claim's dot in the # column.
+              </li>
+              <li>
+                When two model claims share words, their lines stack below the
+                passage, and each claim keeps its own level for its whole
+                passage.
+              </li>
+              <li>
+                A colored line above a passage marks a claim a human reviewer
+                added (the +1, +2 rows).
+              </li>
+              <li>
+                Click a marked passage to select its claim in the table. Where
+                claims overlap, click again to move to the next one.
+              </li>
+            </ul>
+          </details>
         </div>
 
         {/* Full height and page width, so the page is the only thing that scrolls. */}
@@ -331,11 +320,12 @@ export default function GradesTaskView({
               </TableHead>
               <TableHead className="w-24">
                 <strong>Humans</strong> disagree with <strong>model</strong> on{" "}
-                <em>grade</em>
+                <em>claim grade</em>
               </TableHead>
               <TableHead className="w-24">
                 <strong>Humans</strong> disagree with <strong>humans</strong> on{" "}
-                <em>grade</em>
+                <em>claim grade</em>
+                <HumansVsHumansInfo />
               </TableHead>
               <TableHead className="w-24">
                 <strong>Humans</strong> flagged claim
@@ -367,8 +357,6 @@ export default function GradesTaskView({
               <TableRow
                 className={cn(
                   "hover:bg-transparent",
-                  claim.disagreement &&
-                    "bg-amber-50/60 hover:bg-amber-50/60 dark:bg-amber-950/25 dark:hover:bg-amber-950/25",
                   activePosition === claim.position &&
                     "ring-2 ring-inset ring-primary/40",
                 )}
@@ -411,12 +399,7 @@ export default function GradesTaskView({
                       detail={`Reviewers gave different grades: ${gradeBreakdown(claim)}.`}
                       text={
                         <Ratio
-                          part={
-                            claim.judgments.length -
-                            Math.max(
-                              ...LABELS.map((label) => claim.labelVotes[label]),
-                            )
-                          }
+                          part={claim.minorityGrades}
                           whole={claim.judgments.length}
                         />
                       }
@@ -465,7 +448,7 @@ export default function GradesTaskView({
                           reviewer,
                           index: reviewerIndex.get(reviewer.id) ?? 0,
                           body: judgment ? (
-                            <DecisionChips
+                            <ReviewerDecision
                               judgment={judgment}
                               proposedLabel={claim.proposedLabel}
                             />
@@ -476,22 +459,6 @@ export default function GradesTaskView({
                           ),
                         }
                       })}
-                      summary={
-                        <>
-                          <SummaryItem label="Model's grade">
-                            <GradeText label={claim.proposedLabel} />
-                          </SummaryItem>
-                          <SummaryItem label="Humans' grades">
-                            <ReviewersGradeCell claim={claim} />
-                          </SummaryItem>
-                          <SummaryItem label="Humans' reviews">
-                            <ReviewersReviewCell
-                              claim={claim}
-                              reviewers={model.reviewers}
-                            />
-                          </SummaryItem>
-                        </>
-                      }
                       title={`Claim ${claim.position + 1}`}
                     />
                   ) : null}
@@ -539,7 +506,7 @@ export default function GradesTaskView({
                 </TableCell>
                 <TableCell className={CLAIM_CELL}>{group.text}</TableCell>
                 <TableCell className="align-top text-xs text-muted-foreground">
-                  not proposed
+                  none, human added
                 </TableCell>
                 <TableCell className={GRADE_CELL}>
                   <AddedGradeCell
@@ -574,21 +541,6 @@ export default function GradesTaskView({
                         ),
                       }
                     })}
-                    summary={
-                      <>
-                        <SummaryItem label="Model's grade">
-                          <span className="text-muted-foreground text-xs">
-                            not proposed
-                          </span>
-                        </SummaryItem>
-                        <SummaryItem label="Humans' grades">
-                          <AddedGradeCell
-                            group={group}
-                            reviewerCount={reviewers.length}
-                          />
-                        </SummaryItem>
-                      </>
-                    }
                     title={`Added claim ${i + 1}`}
                   />
                 </TableCell>

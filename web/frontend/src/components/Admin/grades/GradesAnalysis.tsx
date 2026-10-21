@@ -1,3 +1,10 @@
+import {
+  AgreementBar,
+  emptyGradeGrid,
+  GradeGrid,
+  Swatch,
+  TaskBars,
+} from "./charts"
 import { ReviewChip } from "./chips"
 import {
   type GradesModel,
@@ -65,36 +72,50 @@ function HumanAgreement({
           cannot be measured.
         </span>
       ) : (
-        <ul className="list-disc space-y-1 pl-5">
-          <li>
-            {multi} of the {flaggedTotal} {what} claims were reviewed by two or
-            more people.
-          </li>
-          <li>
-            <span className="font-mono">
-              {unanimous} ({percent(unanimous, multi)})
-            </span>{" "}
-            of those were {what} by all of their reviewers.
-          </li>
-          <li>
-            <span className="font-mono">
-              {multi - unanimous} ({percent(multi - unanimous, multi)})
-            </span>{" "}
-            were {what} by only some of their reviewers.
-          </li>
-          {single > 0 ? (
-            <li className="text-muted-foreground">
-              {single} {what} {single === 1 ? "claim" : "claims"} had a single
-              reviewer, so agreement cannot be measured.
+        <>
+          <AgreementBar
+            all={unanimous}
+            single={single}
+            some={multi - unanimous}
+          />
+          <ul className="list-disc space-y-1 pl-5">
+            <li>
+              <Swatch tone="all" />
+              <span className="font-mono">
+                {unanimous} of {multi} ({percent(unanimous, multi)})
+              </span>{" "}
+              {what} claims reviewed by two or more people were {what} by all of
+              their reviewers.
             </li>
-          ) : null}
-        </ul>
+            <li>
+              <Swatch tone="some" />
+              <span className="font-mono">
+                {multi - unanimous} of {multi} (
+                {percent(multi - unanimous, multi)})
+              </span>{" "}
+              were {what} by only some of their reviewers.
+            </li>
+            {single > 0 ? (
+              <li className="text-muted-foreground">
+                <Swatch tone="single" />
+                {single} {what} {single === 1 ? "claim" : "claims"} had a single
+                reviewer and {single === 1 ? "is" : "are"} not counted.
+              </li>
+            ) : null}
+          </ul>
+        </>
       )}
     </div>
   )
 }
 
-export default function GradesAnalysis({ model }: { model: GradesModel }) {
+export default function GradesAnalysis({
+  model,
+  onOpenTask,
+}: {
+  model: GradesModel
+  onOpenTask: (caseId: string) => void
+}) {
   const gradedClaims = model.tasks.flatMap((task) =>
     task.claims.filter((claim) => claim.judgments.length > 0),
   )
@@ -157,6 +178,12 @@ export default function GradesAnalysis({ model }: { model: GradesModel }) {
     .filter((move) => move.count > 0)
     .sort((a, b) => b.count - a.count)
   const totalMoves = gradeMoves.reduce((sum, move) => sum + move.count, 0)
+  const gradeGrid = emptyGradeGrid()
+  for (const claim of gradedClaims) {
+    for (const judgment of claim.judgments) {
+      gradeGrid[claim.proposedLabel][judgment.effectiveLabel] += 1
+    }
+  }
   const issueClaims = gradedClaims.filter(
     (claim) => claim.choiceCounts.issue > 0,
   )
@@ -173,6 +200,7 @@ export default function GradesAnalysis({ model }: { model: GradesModel }) {
   const reviewedTasks = model.tasks.filter((task) => task.reviews.length > 0)
   const addedClaims = reviewedTasks.flatMap((task) =>
     groupAddedClaims(task.added).map((group) => ({
+      caseId: task.caseId,
       label: LABELS.reduce((best, label) =>
         group.labelVotes[label] > group.labelVotes[best] ? label : best,
       ),
@@ -183,11 +211,15 @@ export default function GradesAnalysis({ model }: { model: GradesModel }) {
       byAll: group.reviewerIds.length === task.reviewerIds.length,
     })),
   )
-  const tasksWithAdded = reviewedTasks.filter((task) => task.added.length > 0)
-  const addedByLabel = (label: Label) =>
-    addedClaims.filter((entry) => entry.label === label).length
-  const addedMulti = addedClaims.filter((entry) => entry.multi)
-  const addedByAll = addedMulti.filter((entry) => entry.byAll).length
+  // A claim made with Split into atoms is not something the model missed; the
+  // model wrote it as part of a bigger claim. Only new claims count here.
+  const newClaims = addedClaims.filter((entry) => !entry.split)
+  const splitAdded = addedClaims.length - newClaims.length
+  const tasksWithNew = new Set(newClaims.map((entry) => entry.caseId)).size
+  const newByLabel = (label: Label) =>
+    newClaims.filter((entry) => entry.label === label).length
+  const newMulti = newClaims.filter((entry) => entry.multi)
+  const newByAll = newMulti.filter((entry) => entry.byAll).length
   const multipleFactsAgreement = agreementOnFlag("multipleFacts")
   const duplicateAgreement = agreementOnFlag("duplicate")
 
@@ -202,6 +234,14 @@ export default function GradesAnalysis({ model }: { model: GradesModel }) {
           <span>claims were flagged by human reviewers as having an</span>
           <ReviewChip>Extraction issue</ReviewChip>
         </p>
+        <TaskBars
+          count={(task) =>
+            task.claims.filter((claim) => claim.choiceCounts.issue > 0).length
+          }
+          onOpenTask={onOpenTask}
+          tasks={model.tasks}
+          what="flagged as an Extraction issue"
+        />
         <HumanAgreement
           flaggedTotal={flaggedClaims("issue")}
           multi={issueAgreement.multi}
@@ -223,6 +263,15 @@ export default function GradesAnalysis({ model }: { model: GradesModel }) {
           <span>claims were marked by human reviewers as needing to be</span>
           <ReviewChip>Split into atoms</ReviewChip>
         </p>
+        <TaskBars
+          count={(task) =>
+            task.claims.filter((claim) => claim.choiceCounts.multipleFacts > 0)
+              .length
+          }
+          onOpenTask={onOpenTask}
+          tasks={model.tasks}
+          what="flagged as Multiple Facts"
+        />
         <HumanAgreement
           flaggedTotal={flaggedClaims("multipleFacts")}
           multi={multipleFactsAgreement.multi}
@@ -251,6 +300,15 @@ export default function GradesAnalysis({ model }: { model: GradesModel }) {
             "No task had a claim flagged as a duplicate."
           )}
         </p>
+        <TaskBars
+          count={(task) =>
+            task.claims.filter((claim) => claim.choiceCounts.duplicate > 0)
+              .length
+          }
+          onOpenTask={onOpenTask}
+          tasks={model.tasks}
+          what="flagged as a Duplicate"
+        />
         <HumanAgreement
           flaggedTotal={flaggedClaims("duplicate")}
           multi={duplicateAgreement.multi}
@@ -261,66 +319,78 @@ export default function GradesAnalysis({ model }: { model: GradesModel }) {
       <Question title="Did the model miss important claims?">
         <p className="flex flex-wrap items-center gap-2 text-sm">
           <span className="font-mono">
-            {tasksWithAdded.length} of {reviewedTasks.length}
+            {tasksWithNew} of {reviewedTasks.length}
           </span>
           <span>
             reviewed tasks had{" "}
             <span className="font-semibold underline underline-offset-4">
               Missing Important claims
             </span>{" "}
-            added by human reviewers, {addedClaims.length} in all.
+            added by human reviewers, {newClaims.length} in all.
           </span>
         </p>
         <ul className="list-disc space-y-1 pl-5 text-sm">
           {LABELS.map((label) => (
             <li key={label}>
               <span className="font-mono">
-                {addedByLabel(label)} (
-                {percent(addedByLabel(label), addedClaims.length)})
+                {newByLabel(label)} (
+                {percent(newByLabel(label), newClaims.length)})
               </span>{" "}
-              of the added claims were graded {label}.
+              of the missing claims were graded {label}.
             </li>
           ))}
           <li className="text-muted-foreground">
-            {addedClaims.filter((entry) => entry.split).length} of the added
-            claims came from splitting a model claim; the rest are new.
+            Another {splitAdded} added {splitAdded === 1 ? "claim" : "claims"}{" "}
+            came from Split into atoms. Those are counted on the atomic-claims
+            card, not here.
           </li>
         </ul>
         <div className="flex flex-col gap-1.5 text-sm">
           <span className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
             Human agreement
           </span>
-          {addedMulti.length === 0 ? (
+          {newMulti.length === 0 ? (
             <span className="text-muted-foreground">
-              No added claim is on a task reviewed by two or more people, so
+              No missing claim is on a task reviewed by two or more people, so
               agreement cannot be measured.
             </span>
           ) : (
-            <ul className="list-disc space-y-1 pl-5">
-              <li>
-                {addedMulti.length} of the {addedClaims.length} added claims are
-                on tasks reviewed by two or more people.
-              </li>
-              <li>
-                <span className="font-mono">
-                  {addedByAll} ({percent(addedByAll, addedMulti.length)})
-                </span>{" "}
-                of those were added by all of the task's reviewers.
-              </li>
-              <li>
-                <span className="font-mono">
-                  {addedMulti.length - addedByAll} (
-                  {percent(addedMulti.length - addedByAll, addedMulti.length)})
-                </span>{" "}
-                were added by only some of them.
-              </li>
-              {addedClaims.length - addedMulti.length > 0 ? (
-                <li className="text-muted-foreground">
-                  {addedClaims.length - addedMulti.length} added claims are on
-                  single-reviewer tasks, so agreement cannot be measured.
+            <>
+              <AgreementBar
+                all={newByAll}
+                single={newClaims.length - newMulti.length}
+                some={newMulti.length - newByAll}
+              />
+              <ul className="list-disc space-y-1 pl-5">
+                <li>
+                  <Swatch tone="all" />
+                  <span className="font-mono">
+                    {newByAll} of {newMulti.length} (
+                    {percent(newByAll, newMulti.length)})
+                  </span>{" "}
+                  missing claims on tasks reviewed by two or more people were
+                  added by all of the task's reviewers.
                 </li>
-              ) : null}
-            </ul>
+                <li>
+                  <Swatch tone="some" />
+                  <span className="font-mono">
+                    {newMulti.length - newByAll} of {newMulti.length} (
+                    {percent(newMulti.length - newByAll, newMulti.length)})
+                  </span>{" "}
+                  were added by only some of them.
+                </li>
+                {newClaims.length - newMulti.length > 0 ? (
+                  <li className="text-muted-foreground">
+                    <Swatch tone="single" />
+                    {newClaims.length - newMulti.length} missing{" "}
+                    {newClaims.length - newMulti.length === 1
+                      ? "claim is"
+                      : "claims are"}{" "}
+                    on single-reviewer tasks and not counted.
+                  </li>
+                ) : null}
+              </ul>
+            </>
           )}
         </div>
       </Question>
@@ -360,22 +430,12 @@ export default function GradesAnalysis({ model }: { model: GradesModel }) {
                 </span>
                 {moves.length === 0 ? (
                   <span className="text-muted-foreground"> · none</span>
-                ) : (
-                  <ul className="mt-1 list-[circle] space-y-1 pl-5">
-                    {moves.map((move) => (
-                      <li key={`${move.from}-${move.to}`}>
-                        <span className="font-mono">
-                          {move.count} ({percent(move.count, totalMoves)})
-                        </span>{" "}
-                        moved from {move.from} to {move.to}.
-                      </li>
-                    ))}
-                  </ul>
-                )}
+                ) : null}
               </li>
             ))}
           </ul>
         )}
+        <GradeGrid counts={gradeGrid} />
         <HumanAgreement
           flaggedTotal={
             gradedClaims.filter((claim) => claim.disagreement).length

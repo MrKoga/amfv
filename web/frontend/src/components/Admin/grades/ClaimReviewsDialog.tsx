@@ -16,26 +16,24 @@ import type { Reviewer } from "./gradesModel"
 
 type ReviewerEntry = {
   reviewer: Reviewer
-  /** Position in the dataset's reviewer list, which picks the chip color. */
+  /** Position in the dataset's reviewer list, which picks the reviewer's color. */
   index: number
   body: ReactNode
 }
 
 /**
  * One claim's ratings, reviewer by reviewer, behind a button in the claims
- * table. The table itself only shows the consensus.
+ * table. The table row itself shows the totals.
  */
 export default function ClaimReviewsDialog({
   claimText,
   dotClass,
   entries,
-  summary,
   title,
 }: {
   claimText: string
   dotClass: string
   entries: ReviewerEntry[]
-  summary: ReactNode
   title: string
 }) {
   return (
@@ -63,19 +61,11 @@ export default function ClaimReviewsDialog({
             {claimText}
           </DialogDescription>
         </DialogHeader>
-        <div className="flex flex-wrap items-start gap-x-8 gap-y-3 rounded-md border p-3">
-          {summary}
-        </div>
         <dl className="grid grid-cols-[auto_1fr] items-start gap-x-4 gap-y-4">
           {entries.map((entry) => (
             <Fragment key={entry.reviewer.id}>
               <dt className="pt-0.5">
-                <ReviewerChip
-                  index={entry.index}
-                  reviewer={entry.reviewer}
-                  size="sm"
-                  withName
-                />
+                <ReviewerChip index={entry.index} reviewer={entry.reviewer} />
               </dt>
               <dd className="text-sm">{entry.body}</dd>
             </Fragment>

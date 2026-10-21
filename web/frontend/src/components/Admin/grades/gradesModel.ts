@@ -51,7 +51,9 @@ export type ClaimSummary = {
   disagreement: boolean
   /** Two or more reviewers graded the claim, and not all gave the same grade. */
   reviewersSplit: boolean
-  /** Reviewers who chose Extraction issue, Duplicate, or Multiple facts. */
+  /** Grades on the claim that are not its most common grade (0 unless two or more graded it). */
+  minorityGrades: number
+  /** Reviewers who chose Extraction issue, Duplicate, or Multiple Facts. */
   flaggedReviews: number
   /** At least one reviewer flagged the claim. */
   flagged: boolean
@@ -62,8 +64,6 @@ type AddedClaim = {
   reviewerId: string
   claim: HumanClaim
 }
-
-type TaskStatus = "unreviewed" | "single" | "multi"
 
 export type TaskSummary = {
   id: number
@@ -96,8 +96,14 @@ export type TaskSummary = {
   flaggedClaims: number
   /** Reviews (one per reviewer per claim) that chose a flag. */
   flaggedReviews: number
-  addedCount: number
-  status: TaskStatus
+  /** Distinct claims reviewers added; the same text from two reviewers counts once. */
+  addedClaims: number
+  /** Of those, claims that at least one reviewer made by splitting a model claim. */
+  addedFromSplits: number
+  /** Additions counted per reviewer. */
+  additions: number
+  /** At least one review was submitted for the task. */
+  reviewed: boolean
 }
 
 export type GradesTotals = {
@@ -106,9 +112,14 @@ export type GradesTotals = {
   unreviewed: number
   /** Model claims across every task, reviewed or not. */
   claims: number
+  /** Reviews submitted, one per reviewer per task. */
+  reviews: number
   /** Reviewer grades on the model's claims, and how many differ from the model's. */
   judgments: number
   changed: number
+  /** Of the changed grades, how many moved toward vital and how many away. */
+  gradedUp: number
+  gradedDown: number
   /** Model claims at least one reviewer graded. */
   judged: number
   /** Model claims with a reviewer grade different from the model's. */
@@ -126,8 +137,10 @@ export type GradesTotals = {
   issues: number
   duplicates: number
   multipleFacts: number
+  /** Distinct claims reviewers added, how many came from splits, and the per-reviewer count. */
   added: number
   splits: number
+  additions: number
 }
 
 export type GradesModel = {
@@ -299,6 +312,11 @@ function summarizeClaim(
     reviewersSplit:
       judgments.length >= 2 &&
       LABELS.filter((label) => labelVotes[label] > 0).length > 1,
+    minorityGrades:
+      judgments.length >= 2
+        ? judgments.length -
+          Math.max(...LABELS.map((label) => labelVotes[label]))
+        : 0,
     flaggedReviews,
     flagged: flaggedReviews > 0,
   }
@@ -310,6 +328,7 @@ function summarizeTask(item: AdminExportModelCorrectionItem): TaskSummary {
   const added: AddedClaim[] = reviews.flatMap((review) =>
     review.human_claims.map((claim) => ({ reviewerId: review.user_id, claim })),
   )
+  const addedGroups = groupAddedClaims(added)
   const judgments = claims.flatMap((claim) => claim.judgments)
   const multiGradedClaims = claims.filter(
     (claim) => claim.judgments.length >= 2,
@@ -337,21 +356,19 @@ function summarizeTask(item: AdminExportModelCorrectionItem): TaskSummary {
       0,
     ),
     minorityGrades: multiGradedClaims.reduce(
-      (count, claim) =>
-        count +
-        claim.judgments.length -
-        Math.max(...LABELS.map((label) => claim.labelVotes[label])),
+      (count, claim) => count + claim.minorityGrades,
       0,
     ),
     flaggedClaims: claims.filter((claim) => claim.flagged).length,
     flaggedReviews: judgments.filter(judgmentFlagged).length,
-    addedCount: added.length,
-    status:
-      reviews.length === 0
-        ? "unreviewed"
-        : reviews.length === 1
-          ? "single"
-          : "multi",
+    addedClaims: addedGroups.length,
+    addedFromSplits: addedGroups.filter((group) =>
+      Object.values(group.byReviewer).some(
+        (claim) => claim.split_from_position != null,
+      ),
+    ).length,
+    additions: added.length,
+    reviewed: reviews.length > 0,
   }
 }
 
@@ -375,8 +392,11 @@ export function buildGradesModel(
     reviewed: 0,
     unreviewed: 0,
     claims: 0,
+    reviews: 0,
     judgments: 0,
     changed: 0,
+    gradedUp: 0,
+    gradedDown: 0,
     judged: 0,
     disagreements: 0,
     multiGraded: 0,
@@ -390,11 +410,13 @@ export function buildGradesModel(
     multipleFacts: 0,
     added: 0,
     splits: 0,
+    additions: 0,
   }
   for (const task of tasks) {
-    if (task.status === "unreviewed") totals.unreviewed += 1
-    else totals.reviewed += 1
+    if (task.reviewed) totals.reviewed += 1
+    else totals.unreviewed += 1
     totals.claims += task.claims.length
+    totals.reviews += task.reviews.length
     totals.judged += task.judged
     totals.judgments += task.judgments
     totals.changed += task.changedGrades
@@ -405,16 +427,25 @@ export function buildGradesModel(
     totals.minorityGrades += task.minorityGrades
     totals.flaggedClaims += task.flaggedClaims
     totals.flaggedReviews += task.flaggedReviews
-    totals.added += task.addedCount
-    totals.splits += task.added.filter(
-      (entry) =>
-        entry.claim.split_from_position !== null &&
-        entry.claim.split_from_position !== undefined,
-    ).length
+    totals.added += task.addedClaims
+    totals.splits += task.addedFromSplits
+    totals.additions += task.additions
     for (const claim of task.claims) {
       totals.issues += claim.choiceCounts.issue
       totals.duplicates += claim.choiceCounts.duplicate
       totals.multipleFacts += claim.choiceCounts.multipleFacts
+      for (const judgment of claim.judgments) {
+        if (!judgment.changed) continue
+        // LABELS runs from vital down, so a smaller index means more important.
+        if (
+          LABELS.indexOf(judgment.effectiveLabel) <
+          LABELS.indexOf(claim.proposedLabel)
+        ) {
+          totals.gradedUp += 1
+        } else {
+          totals.gradedDown += 1
+        }
+      }
     }
   }
 

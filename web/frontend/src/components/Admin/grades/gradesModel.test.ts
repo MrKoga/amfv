@@ -147,6 +147,10 @@ describe("buildGradesModel", () => {
     expect(task.judgments).toBe(4)
     expect(model.totals.disagreements).toBe(1)
     expect(model.totals.changed).toBe(1)
+    // Ann moved claim 2 from semi-important to vital: toward vital is "up".
+    expect(model.totals.gradedUp).toBe(1)
+    expect(model.totals.gradedDown).toBe(0)
+    expect(model.totals.reviews).toBe(2)
   })
 
   test("reviewers splitting a claim between grades is counted separately", () => {
@@ -159,6 +163,8 @@ describe("buildGradesModel", () => {
     expect(task.changedGrades).toBe(1)
     expect(task.multiGradedGrades).toBe(4)
     expect(task.minorityGrades).toBe(1)
+    expect(task.claims[1].minorityGrades).toBe(1)
+    expect(task.claims[0].minorityGrades).toBe(0)
     expect(model.totals.minorityGrades).toBe(1)
   })
 
@@ -182,10 +188,14 @@ describe("buildGradesModel", () => {
     expect(model.reviewerById["u-bo"].kind).toBe("expert")
   })
 
-  test("added claims are counted per reviewer, splits included", () => {
-    expect(task.addedCount).toBe(2)
-    expect(model.totals.added).toBe(2)
+  test("added claims count once per distinct claim, additions per reviewer", () => {
+    // Ann and Bo both added "Gamma holds"; Bo made it by splitting claim 2.
+    expect(task.addedClaims).toBe(1)
+    expect(task.addedFromSplits).toBe(1)
+    expect(task.additions).toBe(2)
+    expect(model.totals.added).toBe(1)
     expect(model.totals.splits).toBe(1)
+    expect(model.totals.additions).toBe(2)
   })
 
   test("added claims with the same text share one row, each reviewer keeping their grade", () => {
@@ -215,7 +225,7 @@ describe("buildGradesModel", () => {
       users,
       {},
     )
-    expect(quiet.tasks[0].status).toBe("unreviewed")
+    expect(quiet.tasks[0].reviewed).toBe(false)
     expect(quiet.totals.unreviewed).toBe(1)
     expect(quiet.totals.claims).toBe(2)
     expect(quiet.totals.judged).toBe(0)
