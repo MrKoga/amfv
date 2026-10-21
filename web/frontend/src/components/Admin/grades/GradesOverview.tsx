@@ -1,4 +1,4 @@
-import { type ReactNode, useState } from "react"
+import { type ReactNode, useLayoutEffect, useRef, useState } from "react"
 
 import { Button } from "@/components/ui/button"
 import {
@@ -9,6 +9,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table"
+import { cn } from "@/lib/utils"
 import ClaimColoredText from "./ClaimColoredText"
 import { SplitBar, Swatch } from "./charts"
 import { HumansVsHumansInfo, Ratio, ReviewChip } from "./chips"
@@ -20,6 +21,46 @@ import {
 } from "./gradesModel"
 
 type Filter = "all" | "disagree" | "split" | "flagged" | "added" | "unreviewed"
+
+/**
+ * A table cell that shows only its first few lines until "Show more" is
+ * clicked. Real questions and answers run to many paragraphs; without this
+ * one Overview row fills the screen.
+ */
+function ClampedCell({
+  children,
+  className,
+}: {
+  children: ReactNode
+  className?: string
+}) {
+  const [expanded, setExpanded] = useState(false)
+  const [overflows, setOverflows] = useState(false)
+  const ref = useRef<HTMLDivElement>(null)
+  useLayoutEffect(() => {
+    const element = ref.current
+    if (element) setOverflows(element.scrollHeight > element.clientHeight + 1)
+  }, [])
+  return (
+    <div className="flex flex-col items-start gap-1">
+      <div
+        className={cn(!expanded && "max-h-24 overflow-hidden", className)}
+        ref={ref}
+      >
+        {children}
+      </div>
+      {overflows ? (
+        <button
+          className="cursor-pointer text-xs text-primary underline underline-offset-2 hover:text-primary/80"
+          onClick={() => setExpanded((current) => !current)}
+          type="button"
+        >
+          {expanded ? "Show less" : "Show more"}
+        </button>
+      ) : null}
+    </div>
+  )
+}
 
 function StatTile({
   label,
@@ -314,15 +355,19 @@ export default function GradesOverview({
                     {task.caseId}
                   </Button>
                 </TableCell>
-                <TableCell className="whitespace-pre-line text-muted-foreground">
-                  {task.question ?? "—"}
+                <TableCell className="text-muted-foreground">
+                  <ClampedCell className="whitespace-pre-line">
+                    {task.question ?? "—"}
+                  </ClampedCell>
                 </TableCell>
-                <TableCell className="whitespace-pre-line text-xs text-muted-foreground">
-                  <ClaimColoredText
-                    className="block leading-8"
-                    owners={claimColorOwners(task)}
-                    text={task.response}
-                  />
+                <TableCell className="text-xs text-muted-foreground">
+                  <ClampedCell className="whitespace-pre-line">
+                    <ClaimColoredText
+                      className="block leading-8"
+                      owners={claimColorOwners(task)}
+                      text={task.response}
+                    />
+                  </ClampedCell>
                 </TableCell>
                 <TableCell className="text-right font-mono">
                   {task.claims.length}
